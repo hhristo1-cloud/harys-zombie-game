@@ -34,7 +34,7 @@
   #stats b { color: #ff6060; font-size: 22px; text-shadow: 0 0 10px rgba(255,40,40,0.5); }
 
   /* Death overlay */
-  #center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; backdrop-filter: blur(3px); background: rgba(0,0,0,0.55); padding: 20px; }
+  #center { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; pointer-events: auto; backdrop-filter: blur(3px); background: rgba(0,0,0,0.55); padding: 20px; }
   #center.hidden { display: none; }
   #center .panel { background: rgba(10,4,8,0.88); padding: 28px 36px; border-radius: 18px; border: 1px solid rgba(255,80,80,0.25); box-shadow: 0 0 60px rgba(120,10,10,0.4); text-align: center; max-width: 90vw; }
   #center h1 { margin: 0 0 12px; font-size: clamp(40px, 9vw, 64px); letter-spacing: 4px; color: #ff2828; text-shadow: 0 0 28px rgba(255,30,30,0.75); }
@@ -47,38 +47,62 @@
   #footer { position: absolute; bottom: max(10px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 11px; opacity: .5; letter-spacing: 1.5px; pointer-events: none; }
   #footer .key { background: rgba(255,80,80,0.12); padding: 1px 7px; border-radius: 5px; color: #ff9090; }
 
-  /* Virtual joystick (mobile) */
-  #joy {
-    position: absolute;
-    bottom: calc(max(20px, env(safe-area-inset-bottom)) + 10px);
-    left: calc(max(20px, env(safe-area-inset-left)) + 10px);
-    width: 130px; height: 130px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.05);
-    border: 2px solid rgba(255,255,255,0.18);
-    box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5);
+  /* Touch zone covers the entire screen (canvas already takes pointer events).
+     The visible joystick floats in to wherever the thumb first lands. */
+  #joyZone {
+    position: absolute; inset: 0;
     pointer-events: auto;
     touch-action: none;
     display: none;
+    z-index: 5;
   }
-  #joy.show { display: block; }
+  #joyZone.show { display: block; }
+  #joy {
+    position: absolute;
+    width: 140px; height: 140px;
+    margin-left: -70px; margin-top: -70px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: 2px solid rgba(255,255,255,0.22);
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+  }
+  #joy.active { opacity: 1; }
   #joyKnob {
     position: absolute;
     top: 50%; left: 50%;
-    width: 56px; height: 56px;
-    margin: -28px 0 0 -28px;
+    width: 60px; height: 60px;
+    margin: -30px 0 0 -30px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ff7878, #b82828);
     border: 2px solid rgba(255,255,255,0.4);
     box-shadow: 0 0 18px rgba(255,40,40,0.5), inset 0 2px 4px rgba(255,255,255,0.3);
     pointer-events: none;
-    transition: transform .08s ease-out;
   }
-  #joy.active #joyKnob { transition: none; }
 
-  /* Show joystick on coarse-pointer (touch) devices, hide footer keys */
+  /* Joystick anchor hint visible on touch devices before first touch */
+  #joyHint {
+    position: absolute;
+    bottom: calc(max(28px, env(safe-area-inset-bottom)) + 18px);
+    left: calc(max(28px, env(safe-area-inset-left)) + 18px);
+    width: 110px; height: 110px;
+    border-radius: 50%;
+    border: 2px dashed rgba(255,255,255,0.22);
+    pointer-events: none;
+    display: none;
+    align-items: center; justify-content: center;
+    font-size: 11px; letter-spacing: 1.5px; color: rgba(255,255,255,0.5);
+    text-align: center;
+    z-index: 4;
+  }
+  #joyHint.show { display: flex; }
+  #joyHint.hide { display: none; }
+
   @media (pointer: coarse) {
-    #joy { display: block; }
+    #joyZone { display: block; }
+    #joyHint { display: flex; }
     #footer .key { display: none; }
     #footer { font-size: 10px; }
   }
@@ -97,7 +121,8 @@
   <div><span class="lbl">TIME</span>  <b id="time">0:00</b></div>
 </div>
 
-<div id="joy"><div id="joyKnob"></div></div>
+<div id="joyZone"><div id="joy"><div id="joyKnob"></div></div></div>
+<div id="joyHint">DRAG<br>ANYWHERE</div>
 
 <div id="center" class="hidden">
   <div class="panel">
@@ -142,58 +167,61 @@
   });
   addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
-  // ---- Input: virtual joystick ----
-  const joy = { el: document.getElementById('joy'), knob: document.getElementById('joyKnob'),
-                active: false, pid: null, cx: 0, cy: 0, dx: 0, dy: 0, max: 50 };
+  // ---- Input: virtual joystick (free-floating, anywhere on screen) ----
+  const joyZone = document.getElementById('joyZone');
+  const joyEl   = document.getElementById('joy');
+  const joyKnob = document.getElementById('joyKnob');
+  const joyHint = document.getElementById('joyHint');
+  const joy = { active: false, pid: null, cx: 0, cy: 0, dx: 0, dy: 0, max: 55 };
 
-  function joyStart(e) {
-    const t = e.touches ? e.touches[0] : e;
-    const r = joy.el.getBoundingClientRect();
-    joy.cx = r.left + r.width / 2;
-    joy.cy = r.top + r.height / 2;
-    joy.active = true;
-    joy.pid = e.pointerId ?? (e.touches ? e.touches[0].identifier : null);
-    joy.el.classList.add('active');
-    joyMove(e);
+  const isTouch = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+                  || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (isTouch) {
+    joyZone.classList.add('show');
+    joyHint.classList.add('show');
   }
-  function joyMove(e) {
-    if (!joy.active) return;
-    let cx, cy;
-    if (e.touches) {
-      let t = null;
-      for (const tt of e.touches) if (tt.identifier === joy.pid) { t = tt; break; }
-      if (!t) t = e.touches[0];
-      cx = t.clientX; cy = t.clientY;
-    } else {
-      cx = e.clientX; cy = e.clientY;
-    }
-    let dx = cx - joy.cx, dy = cy - joy.cy;
+
+  function placeJoy(x, y) {
+    joy.cx = x;
+    joy.cy = y;
+    joyEl.style.left = x + 'px';
+    joyEl.style.top  = y + 'px';
+    joyKnob.style.transform = 'translate(0,0)';
+  }
+  function updateKnob(x, y) {
+    let dx = x - joy.cx, dy = y - joy.cy;
     const d = Math.hypot(dx, dy);
     if (d > joy.max) { dx = dx / d * joy.max; dy = dy / d * joy.max; }
     joy.dx = dx; joy.dy = dy;
-    joy.knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
   }
-  function joyEnd(e) {
-    if (!joy.active) return;
-    joy.active = false;
-    joy.dx = 0; joy.dy = 0;
-    joy.el.classList.remove('active');
-    joy.knob.style.transform = 'translate(0,0)';
-  }
-  joy.el.addEventListener('pointerdown', e => { joy.el.setPointerCapture?.(e.pointerId); joyStart(e); e.preventDefault(); });
-  joy.el.addEventListener('pointermove', e => { if (joy.active) { joyMove(e); e.preventDefault(); } });
-  joy.el.addEventListener('pointerup',     joyEnd);
-  joy.el.addEventListener('pointercancel', joyEnd);
-  // Touch fallbacks for older mobile browsers
-  joy.el.addEventListener('touchstart',  e => { joyStart(e); e.preventDefault(); }, { passive: false });
-  joy.el.addEventListener('touchmove',   e => { joyMove(e);  e.preventDefault(); }, { passive: false });
-  joy.el.addEventListener('touchend',    joyEnd);
-  joy.el.addEventListener('touchcancel', joyEnd);
 
-  // Show joystick on touch devices
-  if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
-    joy.el.classList.add('show');
+  joyZone.addEventListener('pointerdown', e => {
+    // Avoid catching taps on the restart button (it sits above on z)
+    joyZone.setPointerCapture(e.pointerId);
+    joy.active = true;
+    joy.pid = e.pointerId;
+    placeJoy(e.clientX, e.clientY);
+    joyEl.classList.add('active');
+    joyHint.classList.add('hide');
+    e.preventDefault();
+  });
+  joyZone.addEventListener('pointermove', e => {
+    if (!joy.active || e.pointerId !== joy.pid) return;
+    updateKnob(e.clientX, e.clientY);
+    e.preventDefault();
+  });
+  function endJoy(e) {
+    if (!joy.active || (e && e.pointerId !== joy.pid)) return;
+    joy.active = false;
+    joy.pid = null;
+    joy.dx = 0; joy.dy = 0;
+    joyEl.classList.remove('active');
+    joyKnob.style.transform = 'translate(0,0)';
   }
+  joyZone.addEventListener('pointerup',     endJoy);
+  joyZone.addEventListener('pointercancel', endJoy);
+  joyZone.addEventListener('lostpointercapture', endJoy);
 
   // ---- Tuning ----
   const PLAYER_SPEED   = 220;
