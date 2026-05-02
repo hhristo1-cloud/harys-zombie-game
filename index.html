@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1a060a">
-<title>Hary's Zombie Race</title>
+<title>Hary's Deathbike</title>
 <style>
   html, body {
     margin:0; padding:0; height:100%; background:#0a0508; overflow:hidden;
@@ -102,7 +102,7 @@
 <body>
 <div id="hud" class="ui">
   <div>TIME  <b id="time">0.0</b></div>
-  <div>METERS <b id="dist">0</b> / 280</div>
+  <div>METERS <b id="dist">0</b> / 1000</div>
 </div>
 <div id="place" class="ui">
   <div>PLACE  <b id="placeNum">—</b></div>
@@ -116,13 +116,13 @@
 <div id="vignette"></div>
 <div id="center" class="ui">
   <div class="panel">
-    <h1>HARY'S ZOMBIE RACE</h1>
-    <h2>Outshamble 2 corpses through 280m of carnage</h2>
-    <p class="desktop-only">Run <span class="key">W</span> / <span class="key">↑</span>  ·  Stagger <span class="key">A</span> <span class="key">D</span>  ·  Brake <span class="key">S</span>  ·  Jump <span class="key">SPACE</span></p>
-    <p class="mobile-only" style="display:none">Drag the left side to steer  ·  Tap <span class="key">JUMP</span> to leap  ·  You auto-run forward</p>
-    <p style="opacity:.78">Spinning bars · Meat-hook pendulums · Rolling barrels · Crushing pistons · Saw blades</p>
-    <p style="opacity:.78">Grab <span style="color:#4dffff">cyan potions</span> for a speed boost</p>
-    <button id="playBtn">SHAMBLE</button>
+    <h1>HARY'S DEATHBIKE</h1>
+    <h2>1km of zombie carnage. Outride 2 rivals. No mercy.</h2>
+    <p class="desktop-only">Throttle <span class="key">W</span> / <span class="key">↑</span>  ·  Steer <span class="key">A</span> <span class="key">D</span>  ·  Brake <span class="key">S</span>  ·  Jump <span class="key">SPACE</span></p>
+    <p class="mobile-only" style="display:none">Drag the left side to steer  ·  Tap <span class="key">JUMP</span> to launch  ·  Throttle is automatic</p>
+    <p style="opacity:.78">Spinning bars · Pendulum hooks · Rolling barrels · Crushing pistons · Saw blades</p>
+    <p style="opacity:.78">Grab <span style="color:#4dffff">cyan nitros</span> for a speed boost</p>
+    <button id="playBtn">RIDE</button>
   </div>
 </div>
 <div id="footer" class="ui"><span class="key">R</span> restart</div>
@@ -150,7 +150,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const $ = (id) => document.getElementById(id);
-const BEST_KEY = 'tumble_best_v2';
+const BEST_KEY = 'deathbike_best_v1'; // bumped from 'tumble_best_v2' — course length changed, old times invalid
 
 // ---- Mobile detection (touch device or small screen) ----
 const IS_MOBILE = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
@@ -304,7 +304,7 @@ torch.position.set(0, 6, 0);
 scene.add(torch);
 
 // ---------------- course ----------------
-const COURSE_LEN = 290;
+const COURSE_LEN = 1000;
 const COURSE_W = 11;
 const FINISH_Z = COURSE_LEN - 4;
 
@@ -373,7 +373,7 @@ const crowd = [];
 
 // distance markers (every 50m)
 {
-  for (let d = 50; d < 280; d += 50) {
+  for (let d = 100; d < COURSE_LEN - 20; d += 100) {
     const z = 5 + d;
     const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
     const cc = cv.getContext('2d');
@@ -523,127 +523,390 @@ function dropBloodPool(x, z) {
 
 // ---------------- audio ----------------
 let audioCtx = null;
+let masterGain = null;
+let musicGain = null;
+let sfxGain = null;
+function ensureAudio() {
+  if (audioCtx) return audioCtx;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain(); masterGain.gain.value = 1.0; masterGain.connect(audioCtx.destination);
+    musicGain  = audioCtx.createGain(); musicGain.gain.value = 0.55;  musicGain.connect(masterGain);
+    sfxGain    = audioCtx.createGain(); sfxGain.gain.value = 0.85;    sfxGain.connect(masterGain);
+  } catch (_) { audioCtx = null; }
+  return audioCtx;
+}
 function beep(freq, dur, type = 'sine', vol = 0.08) {
   try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!ensureAudio()) return;
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = type; o.frequency.value = freq;
     g.gain.value = vol;
-    o.connect(g); g.connect(audioCtx.destination);
+    o.connect(g); g.connect(sfxGain || audioCtx.destination);
     o.start();
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
     o.stop(audioCtx.currentTime + dur);
   } catch (_) {}
 }
 
+// ---- Engine sound: continuous saw + filter that pitches with speed ----
+let engineNodes = null;
+function startEngine() {
+  if (engineNodes || !ensureAudio()) return;
+  const ctx = audioCtx;
+  const gain = ctx.createGain(); gain.gain.value = 0;
+  const osc1 = ctx.createOscillator(); osc1.type = 'sawtooth'; osc1.frequency.value = 55;
+  const osc2 = ctx.createOscillator(); osc2.type = 'sawtooth'; osc2.frequency.value = 82;  // 5th
+  const sub  = ctx.createOscillator(); sub.type = 'sine';     sub.frequency.value = 40;
+  const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 600; filter.Q.value = 8;
+  // LFO modulation gives a chugging texture
+  const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 12;
+  const lfoGain = ctx.createGain(); lfoGain.gain.value = 80;
+  lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+  osc1.connect(filter); osc2.connect(filter); sub.connect(gain);
+  filter.connect(gain); gain.connect(sfxGain);
+  osc1.start(); osc2.start(); sub.start(); lfo.start();
+  engineNodes = { gain, osc1, osc2, sub, filter, lfo };
+}
+function setEngineSpeed(speedFactor) {
+  if (!engineNodes || !audioCtx) return;
+  const t = audioCtx.currentTime, lerp = 0.07;
+  const f = Math.max(0, Math.min(1.6, speedFactor));
+  const baseFreq = 45 + f * 95;
+  try {
+    engineNodes.osc1.frequency.linearRampToValueAtTime(baseFreq,        t + lerp);
+    engineNodes.osc2.frequency.linearRampToValueAtTime(baseFreq * 1.5,  t + lerp);
+    engineNodes.sub.frequency.linearRampToValueAtTime(baseFreq * 0.55,  t + lerp);
+    engineNodes.filter.frequency.linearRampToValueAtTime(280 + f * 1500, t + lerp);
+    engineNodes.gain.gain.linearRampToValueAtTime(0.045 + f * 0.07,     t + lerp);
+  } catch (_) {}
+}
+function stopEngine() {
+  if (!engineNodes || !audioCtx) return;
+  try { engineNodes.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.25); } catch (_) {}
+}
+
+// ---- Crash SFX: layered low boom + noise burst + metal clang ----
+let _noiseBuf = null;
+function noiseBuffer() {
+  if (_noiseBuf) return _noiseBuf;
+  const ctx = audioCtx;
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.6, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() - 0.5);
+  _noiseBuf = buf; return buf;
+}
+function crashSfx() {
+  if (!ensureAudio()) return;
+  const ctx = audioCtx, t = ctx.currentTime;
+  // low boom
+  { const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(35, t + 0.45);
+    g.gain.setValueAtTime(0.45, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + 0.6); }
+  // noise impact
+  { const src = ctx.createBufferSource(); src.buffer = noiseBuffer();
+    const filt = ctx.createBiquadFilter(); filt.type = 'bandpass'; filt.frequency.value = 1100; filt.Q.value = 0.9;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    src.connect(filt); filt.connect(g); g.connect(sfxGain); src.start(t); src.stop(t + 0.4); }
+  // metal clang
+  { const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = 'square'; o.frequency.value = 720;
+    g.gain.setValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    o.connect(g); g.connect(sfxGain); o.start(t + 0.02); o.stop(t + 0.25); }
+}
+
+// ---- Procedural music: dark industrial loop scheduled on Web Audio time ----
+let musicState = null;
+const STEP_SEC = 0.155;       // ~96 BPM 16ths feel
+const PATTERN_LEN = 32;
+// Bass pattern in Hz (A minor-ish): 0 = rest
+const BASS_PATTERN = [
+  55, 0, 0, 0,  55, 0, 0, 73,   0, 0, 55, 0,  73, 0, 82, 0,
+  55, 0, 0, 0,  55, 0, 0, 65,   0, 0, 55, 0,  73, 0, 65, 0,
+];
+function startMusic() {
+  if (musicState || !ensureAudio()) return;
+  // Resume context if suspended (browser autoplay policy)
+  if (audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (_) {} }
+  musicState = { startTime: audioCtx.currentTime + 0.05, nextStep: 0, stopped: false, intensity: 1.0 };
+  scheduleMusic();
+}
+function stopMusic() { if (musicState) musicState.stopped = true; musicState = null; }
+function setMusicIntensity(v) { if (musicState) musicState.intensity = v; }
+function scheduleMusic() {
+  if (!musicState || musicState.stopped) return;
+  const ctx = audioCtx;
+  const lookAhead = 0.30;
+  while (musicState.startTime + musicState.nextStep * STEP_SEC < ctx.currentTime + lookAhead) {
+    const stepTime = musicState.startTime + musicState.nextStep * STEP_SEC;
+    playMusicStep(musicState.nextStep % PATTERN_LEN, stepTime, musicState.intensity);
+    musicState.nextStep++;
+  }
+  setTimeout(scheduleMusic, 70);
+}
+function playMusicStep(idx, t, intensity = 1.0) {
+  // Kick on every 4 steps (downbeats)
+  if (idx % 4 === 0) playKick(t, 0.32 * intensity);
+  // Hat on the 16ths in between
+  if (idx % 2 === 1) playHat(t, 0.04 * intensity);
+  // Snare on 2 and 4 (steps 8 and 24)
+  if (idx === 8 || idx === 24) playSnare(t, 0.2 * intensity);
+  // Bass note
+  const bf = BASS_PATTERN[idx];
+  if (bf) playBass(t, bf, STEP_SEC * 1.8, 0.15 * intensity);
+  // Pad chord at top of each 16-step bar
+  if (idx === 0) playPad(t, [110, 130.81, 164.81, 220], STEP_SEC * 16, 0.045 * intensity);
+  // Distant zombie groan, occasionally
+  if (idx === 14 && Math.random() < 0.4) playGroan(t, 0.18 * intensity);
+}
+function playKick(t, vol) {
+  const ctx = audioCtx;
+  const o = ctx.createOscillator(); const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.13);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  o.connect(g); g.connect(musicGain); o.start(t); o.stop(t + 0.22);
+}
+function playHat(t, vol) {
+  const ctx = audioCtx;
+  const src = ctx.createBufferSource(); src.buffer = noiseBuffer();
+  const filt = ctx.createBiquadFilter(); filt.type = 'highpass'; filt.frequency.value = 7000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
+  src.connect(filt); filt.connect(g); g.connect(musicGain); src.start(t); src.stop(t + 0.06);
+}
+function playSnare(t, vol) {
+  const ctx = audioCtx;
+  const src = ctx.createBufferSource(); src.buffer = noiseBuffer();
+  const filt = ctx.createBiquadFilter(); filt.type = 'bandpass'; filt.frequency.value = 1800; filt.Q.value = 0.7;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+  src.connect(filt); filt.connect(g); g.connect(musicGain); src.start(t); src.stop(t + 0.18);
+  // Tonal layer
+  const o = ctx.createOscillator(); const g2 = ctx.createGain();
+  o.type = 'triangle'; o.frequency.value = 220;
+  g2.gain.setValueAtTime(vol * 0.35, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+  o.connect(g2); g2.connect(musicGain); o.start(t); o.stop(t + 0.15);
+}
+function playBass(t, freq, dur, vol) {
+  const ctx = audioCtx;
+  const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
+  const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.Q.value = 4;
+  filt.frequency.setValueAtTime(900, t); filt.frequency.exponentialRampToValueAtTime(160, t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(filt); filt.connect(g); g.connect(musicGain); o.start(t); o.stop(t + dur + 0.05);
+}
+function playPad(t, freqs, dur, vol) {
+  const ctx = audioCtx;
+  for (const f of freqs) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+    o.detune.value = (Math.random() - 0.5) * 14;
+    const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.Q.value = 1.4;
+    filt.frequency.setValueAtTime(380, t);
+    filt.frequency.exponentialRampToValueAtTime(2000, t + dur * 0.5);
+    filt.frequency.exponentialRampToValueAtTime(380, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.6);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(filt); filt.connect(g); g.connect(musicGain); o.start(t); o.stop(t + dur + 0.1);
+  }
+}
+function playGroan(t, vol) {
+  const ctx = audioCtx;
+  const o = ctx.createOscillator(); o.type = 'sawtooth';
+  o.frequency.setValueAtTime(120 + Math.random() * 40, t);
+  o.frequency.exponentialRampToValueAtTime(40, t + 0.6);
+  const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 600;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+  o.connect(filt); filt.connect(g); g.connect(musicGain); o.start(t); o.stop(t + 0.7);
+}
+
 // ---------------- character (zombie) ----------------
-function makeChar(bodyColor, skinColor) {
+// Build a motorcycle + rider. Function name kept for compatibility with existing references.
+function makeChar(frameColor, paintColor) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.55, 0.7, 4, 14),
-    new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.85 })
-  );
-  body.position.y = 0.95;
-  body.castShadow = true;
-  g.add(body);
 
-  const stain1 = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 12, 8),
-    new THREE.MeshStandardMaterial({ color: 0x6e0a0a, roughness: 0.6, emissive: 0x1a0202, emissiveIntensity: 0.3 })
+  // ---- Frame (low boxy chassis) ----
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.32, 1.7),
+    new THREE.MeshStandardMaterial({ color: 0x16161a, roughness: 0.4, metalness: 0.75 })
   );
-  stain1.position.set(0.2, 1.2, 0.45);
-  stain1.scale.set(1, 1, 0.3);
-  g.add(stain1);
-  const stain2 = stain1.clone();
-  stain2.position.set(-0.3, 0.85, 0.42);
-  stain2.scale.set(0.85, 0.85, 0.3);
-  g.add(stain2);
+  frame.position.y = 0.78;
+  frame.castShadow = true;
+  g.add(frame);
 
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 22, 16),
-    new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.9 })
+  // ---- Fuel tank (painted, glossy) ----
+  const tank = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 14, 10),
+    new THREE.MeshStandardMaterial({ color: paintColor, roughness: 0.18, metalness: 0.85, emissive: paintColor, emissiveIntensity: 0.18 })
   );
-  head.position.y = 2.0;
-  head.castShadow = true;
-  g.add(head);
+  tank.scale.set(1.0, 0.65, 1.55);
+  tank.position.set(0, 1.04, 0.18);
+  tank.castShadow = true;
+  g.add(tank);
 
-  // hollow eye sockets
-  const sock = new THREE.MeshStandardMaterial({ color: 0x0a0404, roughness: 0.5 });
-  const e1s = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 10), sock); e1s.position.set(0.2, 2.05, 0.4); g.add(e1s);
-  const e2s = e1s.clone(); e2s.position.set(-0.2, 2.05, 0.4); g.add(e2s);
-  // glowing red pupils (bloom triggers)
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff2020, emissiveIntensity: 4.0 });
-  const e1p = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), pupilMat); e1p.position.set(0.2, 2.05, 0.55); g.add(e1p);
-  const e2p = e1p.clone(); e2p.position.set(-0.2, 2.05, 0.55); g.add(e2p);
+  // ---- Seat ----
+  const seat = new THREE.Mesh(
+    new THREE.BoxGeometry(0.36, 0.1, 0.55),
+    new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.95 })
+  );
+  seat.position.set(0, 1.0, -0.5);
+  g.add(seat);
 
-  // mouth + drip
-  const mouth = new THREE.Mesh(
-    new THREE.BoxGeometry(0.34, 0.09, 0.05),
-    new THREE.MeshStandardMaterial({ color: 0x180202, roughness: 0.7 })
-  );
-  mouth.position.set(0, 1.78, 0.46);
-  g.add(mouth);
-  const drip = new THREE.Mesh(
-    new THREE.ConeGeometry(0.07, 0.32, 8),
-    new THREE.MeshStandardMaterial({ color: 0xc62222, emissive: 0x4a0606, emissiveIntensity: 0.7 })
-  );
-  drip.rotation.x = Math.PI;
-  drip.position.set(0.05, 1.6, 0.46);
-  g.add(drip);
+  // ---- Wheels (cylinders rotated to lie on their sides) ----
+  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.18, 18);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x06060a, roughness: 0.9, metalness: 0.2 });
+  const wheelF = new THREE.Mesh(wheelGeo, wheelMat);
+  wheelF.position.set(0, 0.42, 1.0);
+  wheelF.rotation.z = Math.PI / 2;
+  wheelF.castShadow = true;
+  g.add(wheelF);
+  const wheelR = new THREE.Mesh(wheelGeo, wheelMat);
+  wheelR.position.set(0, 0.42, -1.0);
+  wheelR.rotation.z = Math.PI / 2;
+  wheelR.castShadow = true;
+  g.add(wheelR);
 
-  // rotted wrap "hat"
-  const hat = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.55, 0.28, 14),
-    new THREE.MeshStandardMaterial({ color: 0x2e1808, roughness: 1.0 })
-  );
-  hat.position.y = 2.5;
-  hat.castShadow = true;
-  g.add(hat);
-  const brim = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.62, 0.62, 0.06, 16),
-    new THREE.MeshStandardMaterial({ color: 0x1a0e06, roughness: 1.0 })
-  );
-  brim.position.y = 2.36;
-  g.add(brim);
+  // ---- Wheel rims (glowing red disc on the outside face for that arcade vibe) ----
+  const rimGeo = new THREE.CircleGeometry(0.30, 18);
+  const rimMat = new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.85 });
+  const rimF = new THREE.Mesh(rimGeo, rimMat);
+  rimF.position.copy(wheelF.position); rimF.position.x = 0.105;
+  rimF.rotation.y = Math.PI / 2;
+  g.add(rimF);
+  const rimR = new THREE.Mesh(rimGeo, rimMat);
+  rimR.position.copy(wheelR.position); rimR.position.x = 0.105;
+  rimR.rotation.y = Math.PI / 2;
+  g.add(rimR);
 
-  // outstretched arms
-  const armM = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.9 });
-  const armG = new THREE.CapsuleGeometry(0.16, 0.5, 4, 8);
-  const armL = new THREE.Mesh(armG, armM);
-  armL.position.set(0.72, 1.25, 0.45);
-  armL.rotation.x = -0.6;
+  // ---- Headlight (front, glowing) ----
+  const headlight = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c8 })
+  );
+  headlight.position.set(0, 1.0, 1.18);
+  g.add(headlight);
+  const headGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 10, 6),
+    new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.5 })
+  );
+  headGlow.position.copy(headlight.position);
+  g.add(headGlow);
+
+  // ---- Handlebars (horizontal bar at the front) ----
+  const barMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5, metalness: 0.7 });
+  const handlebar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.7, 8), barMat);
+  handlebar.rotation.z = Math.PI / 2;
+  handlebar.position.set(0, 1.32, 0.95);
+  g.add(handlebar);
+
+  // ---- Front fork (two struts down to the front wheel) ----
+  const forkGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.7, 6);
+  const forkL = new THREE.Mesh(forkGeo, barMat);
+  forkL.position.set(0.16, 0.7, 1.0);
+  g.add(forkL);
+  const forkR = new THREE.Mesh(forkGeo, barMat);
+  forkR.position.set(-0.16, 0.7, 1.0);
+  g.add(forkR);
+
+  // ---- Exhaust pipes (glowing tips) ----
+  const exGeo = new THREE.CylinderGeometry(0.08, 0.06, 0.95, 8);
+  const exMat = new THREE.MeshStandardMaterial({ color: 0x46464a, roughness: 0.3, metalness: 0.92 });
+  const exL = new THREE.Mesh(exGeo, exMat);
+  exL.rotation.x = Math.PI / 2;
+  exL.position.set(0.22, 0.55, -0.75);
+  g.add(exL);
+  const exR = new THREE.Mesh(exGeo, exMat);
+  exR.rotation.x = Math.PI / 2;
+  exR.position.set(-0.22, 0.55, -0.75);
+  g.add(exR);
+  const exTipMat = new THREE.MeshBasicMaterial({ color: 0xff4020, transparent: true, opacity: 0.7 });
+  const exTipL = new THREE.Mesh(new THREE.CircleGeometry(0.1, 10), exTipMat);
+  exTipL.position.set(0.22, 0.55, -1.22);
+  exTipL.rotation.y = Math.PI;
+  g.add(exTipL);
+  const exTipR = exTipL.clone();
+  exTipR.position.x = -0.22;
+  g.add(exTipR);
+
+  // ---- Rider: helmet, torso, arms forward, legs astride ----
+  const helmetMat = new THREE.MeshStandardMaterial({ color: frameColor, roughness: 0.32, metalness: 0.4 });
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.30, 16, 12), helmetMat);
+  helmet.position.set(0, 1.86, -0.18);
+  helmet.castShadow = true;
+  g.add(helmet);
+  // helmet visor (red glow band)
+  const visor = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff2020 })
+  );
+  visor.scale.set(0.9, 0.42, 0.55);
+  visor.position.set(0, 1.86, 0.05);
+  g.add(visor);
+
+  // body (jacket, leaning forward)
+  const torsoMat = new THREE.MeshStandardMaterial({ color: frameColor, roughness: 0.85 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.30, 0.42, 4, 10), torsoMat);
+  torso.position.set(0, 1.42, -0.28);
+  torso.rotation.x = -0.42;
+  torso.castShadow = true;
+  g.add(torso);
+
+  // arms (capsules) reaching forward to handlebars
+  const armGeo = new THREE.CapsuleGeometry(0.10, 0.5, 4, 6);
+  const armL = new THREE.Mesh(armGeo, torsoMat);
+  armL.position.set(0.20, 1.32, 0.32);
+  armL.rotation.x = -1.1;
   armL.castShadow = true;
   g.add(armL);
-  const armR = new THREE.Mesh(armG, armM);
-  armR.position.set(-0.72, 1.25, 0.45);
-  armR.rotation.x = -0.6;
+  const armR = new THREE.Mesh(armGeo, torsoMat);
+  armR.position.set(-0.20, 1.32, 0.32);
+  armR.rotation.x = -1.1;
   armR.castShadow = true;
   g.add(armR);
 
-  // ratty pants
-  const legM = new THREE.MeshStandardMaterial({ color: 0x1a1408, roughness: 1.0 });
-  const legG = new THREE.CapsuleGeometry(0.22, 0.32, 4, 8);
-  const legL = new THREE.Mesh(legG, legM); legL.position.set(0.25, 0.4, 0); legL.castShadow = true; g.add(legL);
-  const legR = new THREE.Mesh(legG, legM); legR.position.set(-0.25, 0.4, 0); legR.castShadow = true; g.add(legR);
+  // legs astride the bike
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.95 });
+  const legGeo = new THREE.CapsuleGeometry(0.13, 0.45, 4, 6);
+  const legL = new THREE.Mesh(legGeo, legMat);
+  legL.position.set(0.28, 0.7, -0.35);
+  legL.rotation.x = 0.32;
+  legL.rotation.z = -0.18;
+  g.add(legL);
+  const legR = new THREE.Mesh(legGeo, legMat);
+  legR.position.set(-0.28, 0.7, -0.35);
+  legR.rotation.x = 0.32;
+  legR.rotation.z = 0.18;
+  g.add(legR);
 
-  // shadow blob (additional cheap shadow)
+  // ---- Cheap shadow blob ----
   const sBlob = new THREE.Mesh(
-    new THREE.CircleGeometry(0.85, 16),
-    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false })
+    new THREE.CircleGeometry(1.2, 16),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false })
   );
   sBlob.rotation.x = -Math.PI / 2;
-  sBlob.position.y = 0.03;
+  sBlob.position.y = 0.02;
   g.add(sBlob);
 
+  // Keep field names matching the old runner so the rest of the code (knockdown,
+  // animateLimbs override) continues to work.
   g.userData = {
-    body, head, hat, brim, armL, armR, legL, legR, sBlob,
+    body: frame, head: helmet, hat: helmet, brim: visor,
+    armL, armR, legL, legR, sBlob,
+    wheelF, wheelR, rimF, rimR, exTipL, exTipR, headGlow,
     vx: 0, vz: 0, jumpY: 0, jumpVy: 0,
     knocked: 0, kvx: 0, kvz: 0, iframes: 0,
     runT: 0,
     finished: false, finishTime: 0,
     isAI: false,
     boostT: 0,
+    leanZ: 0,
   };
   return g;
 }
@@ -1050,7 +1313,7 @@ function startRace() {
     u.knocked = 0; u.kvx = 0; u.kvz = 0; u.iframes = 0; u.runT = 0;
     u.finished = false; u.finishTime = 0; u.boostT = 0; u.shield = false;
     if (u.isAI) {
-      u.aiSpeed = (i === 1 ? 9.4 : 9.0) + Math.random() * 0.7;
+      u.aiSpeed = (i === 1 ? 24.0 : 22.5) + Math.random() * 1.8;
       u.aiSwerveT = Math.random() * 10;
     }
   });
@@ -1066,6 +1329,11 @@ function startRace() {
   state.camBank = 0;
   // Clear any leftover near-miss tracking on obstacles
   for (const o of obstacles) { o.prevSide = undefined; }
+  // Audio: kick off the soundtrack and start the engine idle now (countdown gives "rev" build-up)
+  ensureAudio();
+  startEngine();
+  setEngineSpeed(0.15);
+  startMusic();
   $('center').classList.add('hidden');
   $('countdown').classList.remove('hidden');
   showToast('');
@@ -1074,13 +1342,15 @@ function startRace() {
 
 function endRace() {
   state.phase = 'done';
+  stopEngine();
+  stopMusic();
   const finishedChars = allChars.filter(c => c.userData.finished).sort((a, b) => a.userData.finishTime - b.userData.finishTime);
   const playerPlace = finishedChars.indexOf(player) + 1;
   const placeText = playerPlace === 1 ? '1st!' : (playerPlace === 2 ? '2nd' : (playerPlace === 3 ? '3rd' : 'DNF'));
   const myTime = player.userData.finishTime;
   const subEl = $('center').querySelector('h2');
   const titleEl = $('center').querySelector('h1');
-  titleEl.textContent = playerPlace === 1 ? 'YOU SURVIVED' : 'GAME OVER';
+  titleEl.textContent = playerPlace === 1 ? 'WINNER' : 'WIPED OUT';
   let msg = `${placeText}  ·  Time ${myTime.toFixed(2)}s`;
   if (playerPlace === 1 && (state.best === 0 || myTime < state.best)) {
     state.best = myTime;
@@ -1091,7 +1361,7 @@ function endRace() {
     msg += `  ·  Best ${state.best.toFixed(2)}s`;
   }
   subEl.textContent = msg;
-  $('center').querySelector('button').textContent = 'RACE AGAIN';
+  $('center').querySelector('button').textContent = 'RIDE AGAIN';
   $('center').classList.remove('hidden');
 }
 
@@ -1127,10 +1397,9 @@ function knockdown(ch, kvx, kvz) {
   burstParticles(ch.position.x, 1.0, ch.position.z, 0x6e0a0a, 14, { speed: 5 });
   dropBloodPool(ch.position.x, ch.position.z);
   if (ch === player) {
-    showToast(['SPLAT!', 'AAARGH!', 'GUTS!', 'GORE!', 'BLEEDING!', 'OUCH!'][Math.floor(Math.random()*6)]);
-    beep(110, 0.35, 'sawtooth', 0.18);
-    setTimeout(() => beep(80, 0.4, 'sawtooth', 0.14), 90);
-    state.shake = 0.5;
+    showToast(['CRASH!', 'WIPEOUT!', 'EATEN!', 'GORE!', 'WRECKED!', 'OUCH!'][Math.floor(Math.random()*6)]);
+    crashSfx();
+    state.shake = 0.6;
     triggerSlowMo(0.06, 0.09); // hit-stop adds weight to impacts
     if (navigator.vibrate) navigator.vibrate([40, 30, 80]);
   } else {
@@ -1209,9 +1478,9 @@ function updateChar(ch, dt) {
     if (state.phase !== 'racing') { ax = 0; az = 0; }
   }
 
-  const targetVx = ax * 9.5;
-  let baseSpeed = u.isAI ? u.aiSpeed : 10.5;
-  if (u.boostT > 0) baseSpeed *= 1.6;
+  const targetVx = ax * 11.0;
+  let baseSpeed = u.isAI ? u.aiSpeed : 26.0;
+  if (u.boostT > 0) baseSpeed *= 1.65;
   const targetVz = az * baseSpeed;
 
   u.vx += (targetVx - u.vx) * Math.min(1, dt * 13);
@@ -1229,7 +1498,7 @@ function updateChar(ch, dt) {
 
   boundChar(ch);
   animateLimbs(ch, dt, Math.hypot(u.vx, u.vz));
-  ch.rotation.z = -u.vx * 0.04;
+  // (Lean is now handled inside animateLimbs for the bike — sharper, smoothed)
 
   // boost trail
   if (u.boostT > 0 && Math.random() < 0.6) {
@@ -1242,7 +1511,7 @@ function updateChar(ch, dt) {
     if (ch === player) {
       const finishedBefore = allChars.filter(c => c !== ch && c.userData.finished).length;
       const place = finishedBefore + 1;
-      showToast(place === 1 ? 'SURVIVED!' : place === 2 ? '2nd' : '3rd');
+      showToast(place === 1 ? 'FIRST!' : place === 2 ? '2nd' : '3rd');
       beep(880, 0.18, 'square', 0.12);
       setTimeout(() => beep(1200, 0.22, 'square', 0.1), 100);
       lightningFlash(0.8);
@@ -1257,15 +1526,35 @@ function boundChar(ch) {
   if (ch.position.z < 1)      { ch.position.z = 1; }
 }
 
+// Bike "limb" animation: spin wheels with speed, lean into turns, pop a wheelie when jumping,
+// pulse the exhaust glow on boost, slight bounce. Function name preserved for compatibility.
 function animateLimbs(ch, dt, speedMag) {
   const u = ch.userData;
+  // Wheel spin (cylinder lying on its side: spin around its X axis)
+  const wheelSpin = speedMag * 2.6 * dt;
+  if (u.wheelF) u.wheelF.rotation.x += wheelSpin;
+  if (u.wheelR) u.wheelR.rotation.x += wheelSpin;
+  if (u.rimF)   u.rimF.rotation.x   += wheelSpin;
+  if (u.rimR)   u.rimR.rotation.x   += wheelSpin;
+  // Bank (lean) into turns based on lateral velocity — much sharper than a runner's tilt
+  const targetLean = -u.vx * 0.08;
+  u.leanZ = (u.leanZ === undefined ? 0 : u.leanZ) + (targetLean - (u.leanZ || 0)) * Math.min(1, dt * 6);
+  if (ch.userData.knocked <= 0) {
+    ch.rotation.z = u.leanZ;
+    // Wheelie when in the air — tilt nose up
+    const targetPitch = u.jumpVy > 1 ? -0.45 : (u.jumpY > 0.05 ? -0.25 : 0);
+    ch.rotation.x = (ch.rotation.x || 0) + (targetPitch - (ch.rotation.x || 0)) * Math.min(1, dt * 5);
+  }
+  // Subtle frame bounce
   u.runT += dt * Math.max(2, speedMag);
-  const swing = Math.sin(u.runT * 2.2);
-  u.armL.rotation.x = -0.6 + swing * 0.5;
-  u.armR.rotation.x = -0.6 + -swing * 0.5;
-  u.legL.rotation.x = -swing * 0.85;
-  u.legR.rotation.x = swing * 0.85;
-  u.body.position.y = 0.95 + Math.abs(swing) * 0.05;
+  if (u.body) u.body.position.y = 0.78 + Math.sin(u.runT * 9) * 0.02;
+  // Boost glow pulse
+  if (u.exTipL && u.exTipR) {
+    const baseOp = u.boostT > 0 ? 0.95 : 0.55;
+    const pulse = baseOp + Math.sin(u.runT * 12) * 0.18;
+    u.exTipL.material.opacity = pulse;
+    u.exTipR.material.opacity = pulse;
+  }
 }
 
 function checkCollisions(dt) {
@@ -1404,7 +1693,7 @@ function checkCollisions(dt) {
 }
 
 // ---------------- camera ----------------
-const camOffset = new THREE.Vector3(0, 4.8, -8.5);
+const camOffset = new THREE.Vector3(0, 5.2, -10.5);
 const BASE_FOV = camera.fov;        // 72
 const BOOST_FOV = BASE_FOV + 12;    // 84 — punchy without distorting
 function updateCamera(dt) {
@@ -1526,12 +1815,19 @@ function frame(now) {
     for (const ch of allChars) updateChar(ch, dt);
     checkCollisions(dt);
 
+    // Drive engine pitch from player speed (vz / max top speed)
+    const topSpeed = 26.0 * 1.65;
+    const speedFactor = Math.max(0.15, Math.abs(player.userData.vz) / topSpeed);
+    setEngineSpeed(speedFactor);
+
     if (allChars.every(c => c.userData.finished)) {
       setTimeout(endRace, 600);
       state.phase = 'done_pending';
     }
   } else if (state.phase === 'menu' || state.phase === 'done' || state.phase === 'countdown') {
     for (const ch of allChars) animateLimbs(ch, dt, 1);
+    // Idle engine during countdown so it builds anticipation
+    if (state.phase === 'countdown') setEngineSpeed(0.18 + Math.sin(now / 80) * 0.04);
   }
 
   if (toastTimer > 0) {
