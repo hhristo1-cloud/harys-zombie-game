@@ -1,39 +1,23 @@
-# Hary's Zombie Survivor
+# Hary's Zombie Race
 
-Browser-based zombie horde survivor game in the vein of *Vampire Survivors* / *20 Minutes Till Dawn*. Top-down arena, hordes of zombies, auto-firing weapons, level-up upgrade picker. Built mobile-first as a single HTML file using the Canvas 2D API — no build step, no framework.
+3D Stumble-style zombie obstacle race. Run from the horde across a blood-moon arena while collecting shield and speed potions. Built as a single HTML file using Three.js (CDN), no build step.
 
 ## Status
 
-**v0.2 — Step 1 (Foundation) complete.**
-- Top-down 2D Canvas, camera follows player
-- WASD on desktop, virtual joystick on touch devices (analog)
-- Zombies spawn from off-screen and walk at the player
-- Auto-firing pistol locks onto the nearest zombie
-- HP bar, contact damage with brief invulnerability
-- Death overlay with kills + time + restart
-- DPI-aware canvas, safe-area-aware UI, locked viewport
+**v0.1** — Race prototype restored. The brief survivor-genre pivot has been rolled back; we're going deep on the race instead and pushing toward premium polish.
 
-## Mobile-first
+## Direction
 
-Mobile (especially phones) is the primary target. Every step of the roadmap must work and feel good with one thumb on a phone. Touch joystick + auto-fire keeps controls minimal. UI uses `clamp()` and safe-area insets so it works on notched screens. Performance budget: 60fps on mid-tier phones with 200+ on-screen zombies.
+Goal: take this from weekend prototype to a game people would pay for. Roadmap below in priority order — see commit history and individual issues for detail. Mobile is a target platform (most play expected on phones).
 
-## Roadmap to v1.0
+## Roadmap to paid-quality
 
-1. **Foundation** — WASD + touch joystick, zombies that walk at you, auto-firing pistol, HP, death/restart ✅
-2. **Juice** — hit flash, blood, gibs, screen shake, hit-stop on kill, kill thuds
-3. **XP + Leveling** — gem drops, level-up freeze, 3-card upgrade picker
-4. **5 Weapons** — pistol, shotgun, fire ring, lightning chain, bouncing knives — 5 upgrade tiers each
-5. **Enemy Variety** — fast runners, fat tanks, exploders, ranged spitters
-6. **Bosses** — every 5 min, big zombie + treasure chest
-7. **Real Audio** — proper SFX, ambient horror loop, level-up sting
-8. **Meta-Progression** — gold persists between runs → permanent upgrades shop
-9. **3 Maps + 3 Characters** — graveyard, sewer, ruins; characters with starting perks
-10. **Polish** — difficulty modes, achievements, leaderboard, settings, accessibility
+See the in-flight enhancements list pinned in chat. Top tier: real rigged 3D zombies, dynamic horror score, environment biomes, camera dynamics, story chapters + endless mode, meta-progression shop, cosmetic catalog, daily challenges + leaderboards.
 
 ## Play
 
-Open `index.html` in a browser, or visit the deployed URL: https://harys-zombie-game.vercel.app
+Open `index.html` in a browser, or visit https://harys-zombie-game.vercel.app
 
 ## Dev
 
-Single `index.html`, no build step. Vanilla JS + Canvas 2D. Push to `main` → Vercel auto-deploys.
+Single `index.html`. Three.js via CDN module import. Vanilla JS. Push to `main` → Vercel auto-deploys.
