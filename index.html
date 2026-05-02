@@ -41,6 +41,13 @@
   #toast { top:130px; left:0; right:0; text-align:center; font-size:54px; font-weight:900; letter-spacing:2px; color:#ff2030; text-shadow: 0 0 24px rgba(255,30,30,0.9), 0 6px 16px rgba(0,0,0,.7); transition: opacity .15s; opacity:0; }
   #toast.show { opacity:1; }
   #lightning { position:absolute; inset:0; pointer-events:none; background:rgba(255,255,255,0); transition: background-color .05s; }
+  #slowmo {
+    position:absolute; inset:0; pointer-events:none; z-index:8;
+    background: radial-gradient(circle at center, rgba(80,180,255,0) 30%, rgba(40,120,220,0.22) 100%);
+    opacity:0; transition: opacity .12s;
+    mix-blend-mode: screen;
+  }
+  #slowmo.on { opacity:1; }
 
   /* ---- Mobile controls ---- */
   #mobileCtrls { position:absolute; inset:0; pointer-events:none; z-index:5; display:none; }
@@ -105,6 +112,7 @@
 <div id="toast" class="ui"></div>
 <div id="countdown" class="ui hidden"></div>
 <div id="lightning"></div>
+<div id="slowmo"></div>
 <div id="vignette"></div>
 <div id="center" class="ui">
   <div class="panel">
@@ -930,7 +938,18 @@ const state = {
   best: parseInt(localStorage.getItem(BEST_KEY) || '0', 10) / 100, // stored as int (cents of seconds)
   thunder: 0,
   thunderTimer: 6 + Math.random() * 8,
+  // Cinematic time control
+  timeScale: 1,
+  timeScaleTarget: 1,
+  timeScaleHold: 0,
+  nearMissCD: 0,
+  camBank: 0,
 };
+
+function triggerSlowMo(scale, holdSec) {
+  state.timeScaleTarget = scale;
+  state.timeScaleHold = holdSec;
+}
 $('best').textContent = state.best ? state.best.toFixed(2) + 's' : '—';
 
 // ---------------- input ----------------
@@ -1042,6 +1061,11 @@ function startRace() {
   state.phase = 'countdown';
   state.raceTime = 0;
   state.countdown = 3.99;
+  state.timeScale = 1; state.timeScaleTarget = 1; state.timeScaleHold = 0;
+  state.nearMissCD = 0;
+  state.camBank = 0;
+  // Clear any leftover near-miss tracking on obstacles
+  for (const o of obstacles) { o.prevSide = undefined; }
   $('center').classList.add('hidden');
   $('countdown').classList.remove('hidden');
   showToast('');
@@ -1107,6 +1131,7 @@ function knockdown(ch, kvx, kvz) {
     beep(110, 0.35, 'sawtooth', 0.18);
     setTimeout(() => beep(80, 0.4, 'sawtooth', 0.14), 90);
     state.shake = 0.5;
+    triggerSlowMo(0.06, 0.09); // hit-stop adds weight to impacts
     if (navigator.vibrate) navigator.vibrate([40, 30, 80]);
   } else {
     beep(160, 0.2, 'sawtooth', 0.08);
@@ -1347,6 +1372,35 @@ function checkCollisions(dt) {
       }
     }
   }
+
+  // Near-miss detection (player only): fires once per obstacle pass when player
+  // crossed it, wasn't hit, and lateral distance was in the "barely dodged" band.
+  const canNearMiss = state.nearMissCD <= 0
+                   && player.userData.knocked <= 0
+                   && player.userData.iframes <= 0
+                   && state.phase === 'racing';
+  for (const o of obstacles) {
+    if (o.type === 'potion') continue;
+    const dz = player.position.z - o.g.position.z;
+    const side = dz > 0 ? 1 : -1;
+    if (canNearMiss && o.prevSide !== undefined && o.prevSide !== side && side === 1) {
+      const lateral = Math.abs(player.position.x - o.g.position.x);
+      let inBand = false;
+      if      (o.type === 'spinner')  inBand = (lateral > 1.0 && lateral < 2.6);
+      else if (o.type === 'pendulum') inBand = (lateral > 1.2 && lateral < 2.8);
+      else if (o.type === 'saw')      inBand = (lateral > 1.7 && lateral < 3.0);
+      else if (o.type === 'piston')   inBand = (lateral > 0.8 && lateral < 2.5);
+      else if (o.type === 'barrel')   inBand = (lateral > 0.9 && lateral < 2.2);
+      if (inBand) {
+        triggerSlowMo(0.45, 0.22);
+        state.nearMissCD = 1.2;
+        showToast('NEAR MISS!');
+        beep(1200, 0.07, 'sine', 0.06);
+        setTimeout(() => beep(1600, 0.05, 'sine', 0.05), 50);
+      }
+    }
+    o.prevSide = side;
+  }
 }
 
 // ---------------- camera ----------------
@@ -1358,6 +1412,10 @@ function updateCamera(dt) {
   camera.position.lerp(target, Math.min(1, dt * 5));
   const look = new THREE.Vector3(player.position.x * 0.4, player.position.y + 1.4, player.position.z + 6);
   camera.lookAt(look);
+  // Bank into turns — lerp toward target roll based on player's lateral velocity
+  const targetBank = -player.userData.vx * 0.022;
+  state.camBank += (targetBank - state.camBank) * Math.min(1, dt * 5);
+  camera.rotateZ(state.camBank);
   // FOV stretch on boost — lerps in/out so it doesn't snap
   const wantFov = (player.userData.boostT > 0) ? BOOST_FOV : BASE_FOV;
   camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
@@ -1383,8 +1441,16 @@ function lightningFlash(intensity = 1.0) {
 state.shake = 0;
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(40, now - last) / 1000;
+  const realDt = Math.min(40, now - last) / 1000;
   last = now;
+  // Time-scale control (slow-mo + hit-stop). Lerps toward target, snaps back when hold expires.
+  state.timeScaleHold -= realDt;
+  if (state.timeScaleHold <= 0) state.timeScaleTarget = 1;
+  state.timeScale += (state.timeScaleTarget - state.timeScale) * Math.min(1, realDt * 14);
+  state.nearMissCD = Math.max(0, state.nearMissCD - realDt);
+  // Visual cue: slow-mo overlay during near-miss range (excludes hit-stop's harder freeze)
+  $('slowmo').classList.toggle('on', state.timeScale > 0.2 && state.timeScale < 0.8);
+  const dt = realDt * state.timeScale;
 
   // countdown phase
   if (state.phase === 'countdown') {
