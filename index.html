@@ -2,9 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a060a">
 <title>Hary's Zombie Race</title>
 <style>
-  html, body { margin:0; padding:0; height:100%; background:#0a0508; overflow:hidden; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color:#fff; }
+  html, body {
+    margin:0; padding:0; height:100%; background:#0a0508; overflow:hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color:#fff;
+    touch-action: none; overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
   canvas { display:block; }
   #vignette { position:absolute; inset:0; pointer-events:none; box-shadow: inset 0 0 240px 60px rgba(0,0,0,0.85); }
   .ui { position:absolute; pointer-events:none; user-select:none; text-shadow: 0 2px 8px rgba(0,0,0,0.85); }
@@ -17,7 +27,7 @@
   #boostBar div { height:100%; background:linear-gradient(90deg, #4dffff, #2effaa); box-shadow: 0 0 12px #4dffff; }
   #countdown { top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; font-size:180px; font-weight:900; color:#ff3030; text-shadow: 0 0 40px rgba(255,30,30,.7), 0 8px 28px rgba(0,0,0,.7); pointer-events:none; letter-spacing:6px; }
   #countdown.hidden { display:none; }
-  #center { top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; pointer-events:auto; backdrop-filter: blur(2px); }
+  #center { top:0; left:0; right:0; bottom:0; z-index:30; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; pointer-events:auto; backdrop-filter: blur(2px); }
   #center.hidden { display:none; }
   #center .panel { background:rgba(10,4,8,0.7); padding:34px 64px; border-radius:18px; border: 1px solid rgba(255,80,80,0.2); box-shadow: 0 0 60px rgba(120,10,10,0.4); }
   #center h1 { margin:0 0 6px; font-size:60px; letter-spacing:3px; color:#ff3030; text-shadow: 0 0 24px rgba(255,30,30,0.7); }
@@ -31,6 +41,55 @@
   #toast { top:130px; left:0; right:0; text-align:center; font-size:54px; font-weight:900; letter-spacing:2px; color:#ff2030; text-shadow: 0 0 24px rgba(255,30,30,0.9), 0 6px 16px rgba(0,0,0,.7); transition: opacity .15s; opacity:0; }
   #toast.show { opacity:1; }
   #lightning { position:absolute; inset:0; pointer-events:none; background:rgba(255,255,255,0); transition: background-color .05s; }
+
+  /* ---- Mobile controls ---- */
+  #mobileCtrls { position:absolute; inset:0; pointer-events:none; z-index:5; display:none; }
+  #mobileCtrls.show { display:block; }
+  #steerZone { position:absolute; left:0; top:0; bottom:0; width:62%; pointer-events:auto; touch-action:none; }
+  #steerHint {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    color:rgba(255,255,255,0.32); font-size:11px; letter-spacing:3px; font-weight:700;
+    pointer-events:none; text-align:center; line-height:1.6;
+  }
+  #mobileCtrls.dragging #steerHint { opacity:0; }
+  #steerKnob {
+    position:absolute; width:64px; height:64px; margin:-32px 0 0 -32px;
+    border-radius:50%; border:2px solid rgba(255,255,255,0.4);
+    background:radial-gradient(circle at 35% 30%, rgba(255,200,180,0.5), rgba(180,40,40,0.55));
+    box-shadow: 0 0 18px rgba(255,40,40,0.5);
+    pointer-events:none; opacity:0; transition: opacity .15s;
+  }
+  #mobileCtrls.dragging #steerKnob { opacity:1; }
+  #jumpBtn {
+    position:absolute;
+    right:calc(max(20px, env(safe-area-inset-right)) + 4px);
+    bottom:calc(max(28px, env(safe-area-inset-bottom)) + 14px);
+    width:118px; height:118px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ff8060, #b81818);
+    border:3px solid rgba(255,255,255,0.35);
+    color:#fff; font-weight:900; font-size:18px; letter-spacing:2px;
+    box-shadow:0 6px 22px rgba(255,40,40,0.55), inset 0 2px 4px rgba(255,200,200,0.35);
+    pointer-events:auto; touch-action:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #jumpBtn:active { transform: scale(0.92); box-shadow:0 2px 10px rgba(255,40,40,0.5); }
+
+  /* Mobile UI tightening */
+  @media (pointer: coarse), (max-width: 720px) {
+    #hud { font-size:12px; top:max(10px, env(safe-area-inset-top)); left:max(12px, env(safe-area-inset-left)); }
+    #hud b { font-size:18px; }
+    #place { font-size:12px; top:max(10px, env(safe-area-inset-top)); right:max(12px, env(safe-area-inset-right)); }
+    #place b { font-size:18px; }
+    #boostBar { bottom:max(20px, env(safe-area-inset-bottom)); width:140px; }
+    #countdown { font-size:120px; }
+    #toast { font-size:36px; top:90px; }
+    #center .panel { padding:22px 24px; max-width:90vw; }
+    #center h1 { font-size:34px; letter-spacing:1.5px; margin-bottom:4px; }
+    #center h2 { font-size:14px; margin-bottom:10px; }
+    #center p { font-size:12px; line-height:1.5; }
+    #center button { font-size:18px; padding:14px 28px; }
+    #footer { font-size:10px; bottom:max(8px, env(safe-area-inset-bottom)); }
+  }
 </style>
 </head>
 <body>
@@ -51,13 +110,22 @@
   <div class="panel">
     <h1>HARY'S ZOMBIE RACE</h1>
     <h2>Outshamble 2 corpses through 280m of carnage</h2>
-    <p>Run <span class="key">W</span> / <span class="key">↑</span>  ·  Stagger <span class="key">A</span> <span class="key">D</span>  ·  Brake <span class="key">S</span>  ·  Jump <span class="key">SPACE</span></p>
+    <p class="desktop-only">Run <span class="key">W</span> / <span class="key">↑</span>  ·  Stagger <span class="key">A</span> <span class="key">D</span>  ·  Brake <span class="key">S</span>  ·  Jump <span class="key">SPACE</span></p>
+    <p class="mobile-only" style="display:none">Drag the left side to steer  ·  Tap <span class="key">JUMP</span> to leap  ·  You auto-run forward</p>
     <p style="opacity:.78">Spinning bars · Meat-hook pendulums · Rolling barrels · Crushing pistons · Saw blades</p>
     <p style="opacity:.78">Grab <span style="color:#4dffff">cyan potions</span> for a speed boost</p>
     <button id="playBtn">SHAMBLE</button>
   </div>
 </div>
 <div id="footer" class="ui"><span class="key">R</span> restart</div>
+
+<div id="mobileCtrls">
+  <div id="steerZone">
+    <div id="steerHint">DRAG ANYWHERE<br>← STEER →</div>
+    <div id="steerKnob"></div>
+  </div>
+  <button id="jumpBtn" type="button">JUMP</button>
+</div>
 
 <script type="importmap">
 {
@@ -76,6 +144,21 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 const $ = (id) => document.getElementById(id);
 const BEST_KEY = 'tumble_best_v2';
 
+// ---- Mobile detection (touch device or small screen) ----
+const IS_MOBILE = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+  || ('ontouchstart' in window)
+  || (navigator.maxTouchPoints > 0)
+  || innerWidth < 720;
+
+if (IS_MOBILE) {
+  document.getElementById('mobileCtrls').classList.add('show');
+  // Show mobile help line, hide desktop help line
+  document.querySelectorAll('.desktop-only').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.mobile-only').forEach(el => el.style.display = '');
+  // Mobile footer hint
+  document.getElementById('footer').innerHTML = 'Tap to <span class="key">JUMP</span>  ·  drag to steer';
+}
+
 // ---------------- scene + renderer ----------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8a3a28);
@@ -83,29 +166,40 @@ scene.fog = new THREE.Fog(0x8a3a28, 65, 220);
 
 const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 260);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(IS_MOBILE ? 1 : Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.25;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !IS_MOBILE;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-// post-processing
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.55, 0.18);
-composer.addPass(bloom);
+// post-processing — skip on mobile (bloom is the biggest cost)
+let composer = null, bloom = null;
+if (!IS_MOBILE) {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.55, 0.18);
+  composer.addPass(bloom);
+}
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
-  bloom.resolution.set(innerWidth, innerHeight);
+  if (composer) {
+    composer.setSize(innerWidth, innerHeight);
+    bloom.resolution.set(innerWidth, innerHeight);
+  }
 });
+addEventListener('orientationchange', () => setTimeout(() => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (composer) { composer.setSize(innerWidth, innerHeight); bloom.resolution.set(innerWidth, innerHeight); }
+}, 100));
 
 // gradient sky
 {
@@ -148,8 +242,8 @@ addEventListener('resize', () => {
 scene.add(new THREE.HemisphereLight(0xffb878, 0x402418, 1.05));
 const sunLight = new THREE.DirectionalLight(0xffc890, 1.55);
 sunLight.position.set(8, 30, 80);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.castShadow = !IS_MOBILE;
+sunLight.shadow.mapSize.set(IS_MOBILE ? 256 : 1024, IS_MOBILE ? 256 : 1024);
 sunLight.shadow.camera.near = 1;
 sunLight.shadow.camera.far = 160;
 sunLight.shadow.camera.left = -20;
@@ -827,26 +921,72 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-let touchStart = null;
-addEventListener('touchstart', (e) => { touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: performance.now() }; });
-addEventListener('touchend', (e) => {
-  if (!touchStart) return;
-  const t = e.changedTouches[0];
-  const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
-  const adx = Math.abs(dx), ady = Math.abs(dy);
-  if (adx < 28 && ady < 28) return;
-  if (adx > ady) {
-    if (dx < 0) keys['a'] = true; else keys['d'] = true;
-    setTimeout(() => { keys['a'] = false; keys['d'] = false; }, 130);
-  } else {
-    if (dy < 0 && state.phase === 'racing' && player.userData.knocked <= 0 && player.userData.jumpY <= 0) {
-      player.userData.jumpVy = 11; beep(660, 0.08, 'square', 0.08);
-    }
-  }
-  touchStart = null;
-});
+// ---- Mobile touch controls: drag-to-steer + jump button ----
+let mobileSteerX = 0;          // -1 .. 1 analog
+let mobileSteerActive = false;
+let mobileSteerPid = null;
+let mobileSteerStartX = 0;
 
-$('playBtn').addEventListener('click', () => startRace());
+const ctrlsEl  = document.getElementById('mobileCtrls');
+const steerEl  = document.getElementById('steerZone');
+const knobEl   = document.getElementById('steerKnob');
+const jumpBtn  = document.getElementById('jumpBtn');
+
+function steerStart(e) {
+  steerEl.setPointerCapture(e.pointerId);
+  mobileSteerActive = true;
+  mobileSteerPid = e.pointerId;
+  mobileSteerStartX = e.clientX;
+  mobileSteerX = 0;
+  // Anchor knob to first touch point
+  knobEl.style.left = e.clientX + 'px';
+  knobEl.style.top  = e.clientY + 'px';
+  knobEl.style.transform = 'translate(0,0)';
+  ctrlsEl.classList.add('dragging');
+  e.preventDefault();
+}
+function steerMove(e) {
+  if (!mobileSteerActive || e.pointerId !== mobileSteerPid) return;
+  const dx = e.clientX - mobileSteerStartX;
+  const max = Math.min(90, innerWidth * 0.22);
+  mobileSteerX = Math.max(-1, Math.min(1, dx / max));
+  knobEl.style.transform = `translate(${mobileSteerX * 50}px, 0)`;
+  e.preventDefault();
+}
+function steerEnd(e) {
+  if (!mobileSteerActive || (e && e.pointerId !== mobileSteerPid)) return;
+  mobileSteerActive = false;
+  mobileSteerPid = null;
+  mobileSteerX = 0;
+  ctrlsEl.classList.remove('dragging');
+}
+steerEl.addEventListener('pointerdown', steerStart);
+steerEl.addEventListener('pointermove', steerMove);
+steerEl.addEventListener('pointerup', steerEnd);
+steerEl.addEventListener('pointercancel', steerEnd);
+steerEl.addEventListener('lostpointercapture', steerEnd);
+
+function tryJump() {
+  if (state.phase === 'racing' && player.userData.knocked <= 0 && player.userData.jumpY <= 0) {
+    player.userData.jumpVy = 11;
+    beep(660, 0.08, 'square', 0.08);
+  }
+}
+jumpBtn.addEventListener('pointerdown', (e) => { tryJump(); e.preventDefault(); });
+
+// Use pointerdown for zero-delay tap on mobile; guard against repeat
+let _playBtnHandled = false;
+$('playBtn').addEventListener('pointerdown', (e) => {
+  if (_playBtnHandled) return;
+  _playBtnHandled = true;
+  startRace();
+  setTimeout(() => { _playBtnHandled = false; }, 400);
+  e.preventDefault();
+});
+$('playBtn').addEventListener('click', () => {
+  if (_playBtnHandled) return;
+  startRace();
+});
 
 function startRace() {
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -941,6 +1081,7 @@ function knockdown(ch, kvx, kvz) {
     beep(110, 0.35, 'sawtooth', 0.18);
     setTimeout(() => beep(80, 0.4, 'sawtooth', 0.14), 90);
     state.shake = 0.5;
+    if (navigator.vibrate) navigator.vibrate([40, 30, 80]);
   } else {
     beep(160, 0.2, 'sawtooth', 0.08);
   }
@@ -1009,6 +1150,11 @@ function updateChar(ch, dt) {
     if (keys['d'] || keys['arrowright']) ax -= 1;
     if (keys['w'] || keys['arrowup'])    az += 1;
     if (keys['s'] || keys['arrowdown'])  az -= 0.6;
+    // Mobile: auto-run forward; steer maps to lateral
+    if (IS_MOBILE && state.phase === 'racing') {
+      az = 1;
+      ax -= mobileSteerX;
+    }
     if (state.phase !== 'racing') { ax = 0; az = 0; }
   }
 
@@ -1089,6 +1235,7 @@ function checkCollisions(dt) {
               showToast('SHIELD!');
               beep(700, 0.10, 'sine', 0.10);
               setTimeout(() => beep(1000, 0.12, 'sine', 0.10), 60);
+              if (navigator.vibrate) navigator.vibrate(25);
             }
           } else {
             ch.userData.boostT = 2.4;
@@ -1096,6 +1243,7 @@ function checkCollisions(dt) {
               showToast('BOOST!');
               beep(1100, 0.10, 'sine', 0.10);
               setTimeout(() => beep(1500, 0.10, 'sine', 0.10), 60);
+              if (navigator.vibrate) navigator.vibrate([15, 20, 15]);
             }
           }
           burstParticles(o.g.position.x, 1.1, o.g.position.z, o.color, 24, { additive: true, scaleDecay: true });
@@ -1313,7 +1461,8 @@ function frame(now) {
     $('placeNum').textContent = place;
   }
 
-  composer.render();
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
