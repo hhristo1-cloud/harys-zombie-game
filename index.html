@@ -159,6 +159,24 @@ if (IS_MOBILE) {
   document.getElementById('footer').innerHTML = 'Tap to <span class="key">JUMP</span>  ·  drag to steer';
 }
 
+// ---- iOS zoom defense: kill pinch + double-tap zoom that occasionally slips past the meta tag ----
+// Apple-specific gesture events (only fire on iOS Safari during pinch)
+addEventListener('gesturestart',  (e) => e.preventDefault());
+addEventListener('gesturechange', (e) => e.preventDefault());
+addEventListener('gestureend',    (e) => e.preventDefault());
+// Multi-finger touches (pinch / two-finger zoom) — block immediately
+addEventListener('touchstart', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+addEventListener('touchmove',  (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+// Double-tap zoom defense (some iOS versions still allow it through touch-action:none)
+let _lastTap = 0;
+addEventListener('touchend', (e) => {
+  const now = performance.now();
+  if (now - _lastTap < 350) e.preventDefault();
+  _lastTap = now;
+}, { passive: false });
+// Defensive Ctrl+wheel (desktop pinch on trackpads)
+addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
 // ---------------- scene + renderer ----------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8a3a28);
@@ -185,21 +203,29 @@ if (!IS_MOBILE) {
   composer.addPass(bloom);
 }
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+function fitRenderer() {
+  // Prefer visualViewport on mobile so the canvas tracks iOS address-bar show/hide accurately.
+  const vv = window.visualViewport;
+  const w = vv ? vv.width  : innerWidth;
+  const h = vv ? vv.height : innerHeight;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(w, h, false);
+  // Also update CSS so the canvas element doesn't overflow under a moved address bar
+  renderer.domElement.style.width  = w + 'px';
+  renderer.domElement.style.height = h + 'px';
   if (composer) {
-    composer.setSize(innerWidth, innerHeight);
-    bloom.resolution.set(innerWidth, innerHeight);
+    composer.setSize(w, h);
+    bloom.resolution.set(w, h);
   }
-});
-addEventListener('orientationchange', () => setTimeout(() => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  if (composer) { composer.setSize(innerWidth, innerHeight); bloom.resolution.set(innerWidth, innerHeight); }
-}, 100));
+}
+addEventListener('resize', fitRenderer);
+addEventListener('orientationchange', () => setTimeout(fitRenderer, 100));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitRenderer);
+  window.visualViewport.addEventListener('scroll', fitRenderer);
+}
+fitRenderer();
 
 // gradient sky
 {
@@ -1325,11 +1351,17 @@ function checkCollisions(dt) {
 
 // ---------------- camera ----------------
 const camOffset = new THREE.Vector3(0, 4.8, -8.5);
+const BASE_FOV = camera.fov;        // 72
+const BOOST_FOV = BASE_FOV + 12;    // 84 — punchy without distorting
 function updateCamera(dt) {
   const target = player.position.clone().add(camOffset);
   camera.position.lerp(target, Math.min(1, dt * 5));
   const look = new THREE.Vector3(player.position.x * 0.4, player.position.y + 1.4, player.position.z + 6);
   camera.lookAt(look);
+  // FOV stretch on boost — lerps in/out so it doesn't snap
+  const wantFov = (player.userData.boostT > 0) ? BOOST_FOV : BASE_FOV;
+  camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
+  camera.updateProjectionMatrix();
   if (state.shake > 0) {
     state.shake -= dt;
     camera.position.x += (Math.random() - 0.5) * 0.5;
